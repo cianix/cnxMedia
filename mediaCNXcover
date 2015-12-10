@@ -1,0 +1,682 @@
+#!/usr/bin/perl
+
+#
+# Copyright 2014 Luciano Xumerle. All rights reserved.
+# Luciano Xumerle <luciano.xumerle@gmail.com>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+
+use strict;
+use warnings;
+use Getopt::Long;
+
+my $AUTHOR  = 'Luciano Xumerle <luciano.xumerle@gmail.com>';
+my $VERSION = "0.3.6";
+my $DATE    = "(Feb 14, 2014)";
+my $YEAR    = '2007-2014';
+
+# ==============
+# SHELL COMMANDS
+# ==============
+my $RM         = '/bin/rm';
+my $LN         = '/bin/ln';
+my $PDFLATEX   = '/usr/bin/pdflatex';
+my $LATEX      = '/usr/bin/latex';
+my $DVIPS      = '/usr/bin/dvips';
+my $PDFTOPS    = '/usr/bin/pdftops';
+my $CONVERT    = '/usr/bin/convert';
+my $IDENTIFY   = '/usr/bin/identify';
+my $CDLABELGEN = '/usr/bin/cdlabelgen';
+
+# ------------------------------
+# CD-CASE DIMENSION & PARAMETERS
+# ------------------------------
+my $FRONT = q{[width=12.05cm, height=12.05cm]};
+my $BACK  = q{[width=15cm, height=11.7cm]};
+
+my $PAPERBOX_X = q|12.50cm|;
+my $PAPERBOX_Y = q|24.90cm|;
+
+# ------------------
+# DVD CASE DIMENSION
+# ------------------
+my $DVD_DIM  = '[width=184mm, height=274mm]';
+my $DVD_SLIM = '[width=184mm, height=265mm]';
+
+# ----------------
+# TEMP FILE SUFFIX
+# ----------------
+my $tempFile = '_tobedeleted';
+
+########################
+### SAVE THE OPTIONS ###
+########################
+# STORE DETECTED FILE (TXT OR IMAGE FILE)
+my @FILE  = ();
+my @IMAGE = ();
+my $DOSLIM;
+my %opt = ();
+
+# ps -> save to ps file
+# pdf -> save to pdf file
+# tex -> save tex file
+# i -> A4 page with 1 CD cover <back> <front>
+# ibb -> A4 page with 1 CD cover <back1> <back2> (double cd format)
+# i2 -> 2 A4 pages with 1 CD cover <back> <front> <infront>
+# a33 -> A3 with 3 CD cover <back> <front> <back> <front> <back> <front>
+# a32 -> A3 with 2 CD cover <back> <front> <infront> <back> <front> <infront>
+# a3f -> A3 with 6 CD front cover <front> <front> <front> <front> <front> <front>
+# dvd -> creates a dvd cover
+# dvdslim -> creates a dvd slim cover
+# CDLABELGEN OPTIONS
+# cdl -> A4 with 1 CD cover <back> <front> [use cdlabelgen]
+# a -> artist name [use cdlabelgen]
+# t -> cd title [use cdlabelgen]
+# m -> make a slim cover [use cdlabelgen]
+# e -> create envelope [use cdlabelgen]
+# fill2 -> use fill2 back cover [use cdlabelgen]
+# divideImage -> divide booklet images (width / 2)
+
+GetOptions(
+    \%opt, 'ps=s', 'pdf=s', 'tex=s',
+    'i',   'i2',   'ibb',   'a33',
+    'a32', 'a3f',  'cdl',   'a=s',
+    't=s', 'm',    'e',     'fill2',
+    'tex', 'pdf',  'dvd=s', 'dvdslim=s',
+    90,    'divideImage=s'
+);
+
+## keep file from command line
+foreach my $file (@ARGV)
+{
+    if ( -f $file && $file =~ m/jpg$|jpeg$|eps$|gif$|png$|pdf$/i )
+    {
+        push @IMAGE, $file;
+    }
+    elsif ( -f $file )
+    {
+        push @FILE, $file;
+    }
+}
+
+## get the output format
+my $RESFORMAT = 'ps';
+$RESFORMAT = 'pdf' if ( defined $opt{pdf} );
+$RESFORMAT = 'tex' if ( defined $opt{tex} );
+
+## PARSE OPTIONS
+if ( defined $opt{i} && $#IMAGE == 1 )
+{
+    my @img = @IMAGE;
+    @img = @{ &_make_eps( \@IMAGE ) } if ( $RESFORMAT eq 'ps' );
+    &tex2file( &_makeA4tex( 1, @img ), 'A4', $RESFORMAT );
+}
+elsif ( defined $opt{i2} && $#IMAGE == 2 )
+{
+    my @img = @IMAGE;
+    @img = @{ &_make_eps( \@IMAGE ) } if ( $RESFORMAT eq 'ps' );
+    &tex2file( &_makeA4tex( 2, @img ), 'A4', $RESFORMAT );
+}
+elsif ( defined $opt{ibb} && $#IMAGE == 1 )
+{
+    my @img = @IMAGE;
+    @img = @{ &_make_eps( \@IMAGE ) } if ( $RESFORMAT eq 'ps' );
+    &tex2file( &_makeA4tex( 3, @img ), 'A4', $RESFORMAT );
+}
+elsif ( defined $opt{a32} && $#IMAGE == 5 )
+{
+    my @img = @IMAGE;
+    @img = @{ &_make_eps( \@IMAGE ) } if ( $RESFORMAT eq 'ps' );
+    &tex2file( &_a32(@IMAGE), 'A3', $RESFORMAT );
+}
+elsif ( defined $opt{a3f} && $#IMAGE == 5 )
+{
+    my @img = @IMAGE;
+    @img = @{ &_make_eps( \@IMAGE ) } if ( $RESFORMAT eq 'ps' );
+    &tex2file( &_a3f(@IMAGE), 'A3', $RESFORMAT );
+}
+elsif ( defined $opt{a33} && $#IMAGE == 5 )
+{
+    my @img = @IMAGE;
+    @img = @{ &_make_eps( \@IMAGE ) } if ( $RESFORMAT eq 'ps' );
+    &tex2file( &_a33(@IMAGE), 'A3', $RESFORMAT );
+}
+elsif ( defined $opt{cdl} )
+{
+    &cdlabelgen( \@IMAGE, $opt{a}, $opt{t}, $opt{m}, \@FILE, $opt{fill2},
+        $opt{e} );
+}
+elsif ( defined $opt{dvd} && -f $opt{dvd} )
+{
+    &tex2file( &createDVDtex( $opt{dvd}, $opt{90}, $DVD_DIM ),
+        'A4', $RESFORMAT );
+}
+elsif ( defined $opt{dvdslim} && -f $opt{dvdslim} )
+{
+    &tex2file( &createDVDtex( $opt{dvdslim}, $opt{90}, $DVD_SLIM ),
+        'A4', $RESFORMAT );
+}
+elsif ( defined $opt{divideImage} && -f $opt{divideImage} )
+{
+    my @info = @{ &get_width_height( $opt{divideImage} ) };
+    &divideImage( $opt{divideImage}, $info[0], $info[1] );
+}
+else { &_help(); }
+
+##############################################################
+### FINE PROGRAMMA ### INIZIO PROCEDURE ### FINE PROGRAMMA ###
+##############################################################
+
+sub _help
+{
+    my $prog = $0;
+    $prog =~ s/^.+\///;
+    print STDERR <<HELP;
+---------------------------------------------------------------------------
+$prog version $VERSION ($DATE)
+Copyright $YEAR by $AUTHOR
+This is free software; see the source for copying conditions. There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+---------------------------------------------------------------------------
+
+SINTAX [use latex]:
+ $prog [pdf] [tex] -i <img back> <img front>
+ $prog [pdf] [tex] -ibb <img back> <img back2>
+ $prog [pdf] [tex] -i2 <img back> <img front> <img infront>
+ $prog [pdf] [tex] -a33 <back> <front> <back> <front> <back> <front>
+ $prog [pdf] [tex] -a32 <back> <front> <infront> <back> <front> <infront>
+ $prog [pdf] [tex] -a3f <front> <front> <front> <front> <front> <front>
+ $prog [pdf] [tex] -dvd <vertical-dvd-cover> [-90]
+ $prog [pdf] [tex] -dvdslim <vertical-dvd-cover> [-90]
+ $prog -divideImage <image>
+
+SINTAX [use cdlabelgen]:
+ $prog -cdl [-m] [-e] <img back> <img front> [img side]
+ $prog -cdl [-m] [-e] <img back> <img front> -a <artist_name> -t <album_title>
+ $prog -cdl [-m] [-e] <CDDB.txt> <img front> -a <artist_name> -t <album_title>
+
+Others options:
+   -pdf <name>
+   -ps <name>
+   -tex <name>
+
+HELP
+}
+
+#
+# TAKE THE TEX COMMAND LIST AND CREATE THE WANTED OUTPUT FILE
+#
+sub tex2file
+{
+    my $array  = shift;    ## array with latex text
+    my $paper  = shift;
+    my $format = shift;    ## tex, pdf, ps (default)
+
+    $format = 'ps' if ( !defined $format || $format =~ m/^\s*$/ );
+    $paper = "-t " . $paper;
+
+    ## create the tex file
+    my $tex = qq|$tempFile.tex|;
+    print "Saving tex file ...";
+    open( FILE, "> $tex" ) || die;
+    print FILE join( "\n", @{$array} ), "\n";
+    close FILE;
+
+    if ( $format eq 'pdf' )
+    {
+        print "Saving PDF file ...";
+        system( $PDFLATEX, $tex );
+        rename( qq|$tempFile.pdf|, 'result.pdf' );
+        print "\nFile 'result.pdf' successfully created !!!\n\n";
+        &_clean_file(0);
+    }
+    elsif ( $format eq 'ps' )
+    {
+        print "\nMaking DVI ... ";
+        system( $LATEX, $tex );
+        print "DONE.\nShowing preview ... ";
+        system( $DVIPS, $paper, '-o', 'result.ps', qq|$tempFile.dvi| );
+        print "\nFile 'result.ps' successfully created !!!\n\n";
+        &_clean_file(0);
+    }
+    elsif ( $format eq 'tex' )
+    {
+        print "Saving file ...";
+        rename( $tex, 'result.tex' );
+        &_clean_file(1);    # option 1 save eps
+    }
+    else { &_clean_file(0); }
+}
+
+#
+# CREATE EPS IMAGES AND RETURN THE LIST OF NEW IMAGES
+#
+sub _make_eps
+{
+    my $image = shift;
+    print "\nConverting images ...\n\n";
+    my $nn        = 1;
+    my $epsImages = [];
+
+    foreach (@$image)
+    {
+        if ( !( -e $_ ) )
+        {
+            &_clean_file(0);
+            die qq|Image '$_' not Found|;
+        }
+        print "   $nn: $_";
+        my $dest = "$nn.eps";
+        print " --> $dest ...";
+        if (m/.eps$/i)
+        {
+            system( $LN, '-fs', $_, $dest );
+        }
+        elsif (m/.pdf$/i)
+        {
+            system( $PDFTOPS, '-eps', $_, $dest );
+        }
+        else
+        {
+            system( $CONVERT, '-quality', '100', $_, $dest );
+        }
+        push @$epsImages, $dest;
+
+        print " OK\n";
+        $nn++;
+    }
+    print "\nDONE.\n";
+    return $epsImages;
+}
+
+#
+# REMOVE THE TEMPORARY FILE
+#
+sub _clean_file
+{
+    my $rr = shift;
+    `$RM ?.eps >/dev/null 2>/dev/null` if ( !$rr );
+    `$RM $tempFile.* >/dev/null 2>/dev/null`;
+    print "Temporary files removed.\n";
+}
+
+# =============
+# MAKE TEX FILE
+# =============
+
+sub head
+{
+    return q|\documentclass[10pt]{article}
+\setlength{\hoffset}{-50pt}
+\setlength{\textwidth}{470pt}
+\setlength{\voffset}{-80pt}
+\setlength{\textheight}{720pt}
+\usepackage{latexsym}
+\usepackage{graphicx}
+\pagestyle{empty}
+\begin{document}
+|;
+}
+
+sub tail
+{
+    return '\\end{document}';
+}
+
+sub _figura
+{
+    my $file = shift;
+    my $dim  = shift;
+    return "\\includegraphics$dim" . "{$file}";
+}
+
+sub _rotate
+{
+    my $eps   = shift;
+    my $angle = shift;
+    $eps =~ s/\]/, angle=$angle]/;
+    return $eps;
+}
+
+sub _scale
+{
+    my $input = shift;
+    return "\\scalebox{1}{$input}";
+}
+
+sub _makeA4tex
+{
+    my @figure = @_;
+
+    ## type 1 -> 1 page
+    ## type 2 -> 2 page
+    ## type 3 -> 1 page with 2 back image
+    my $tipo = shift @figure;
+    my @tex;
+
+    push @tex, &head;
+    push( @tex, '\\begin{figure}' );
+
+    if ( $tipo == 1 )
+    {
+        push @tex, &_scale( &_figura( $figure[1], $FRONT ) );
+        push @tex, &_scale( &_figura( $figure[0], $BACK ) );
+    }
+    elsif ( $tipo == 2 )
+    {
+        push @tex, &_scale( &_rotate( &_figura( $figure[1], $FRONT ), '90' ) );
+        push @tex, &_scale( &_rotate( &_figura( $figure[2], $FRONT ), '90' ) );
+        push( @tex, '\\end{figure}' );
+        push( @tex, '\\begin{figure}' );
+        push @tex, &_scale( &_figura( $figure[0], $BACK ) );
+    }
+    elsif ( $tipo == 3 )
+    {
+        push @tex, &_scale( &_figura( $figure[1], $BACK ) );
+        push @tex, &_scale( &_figura( $figure[0], $BACK ) );
+    }
+    push( @tex, '\\end{figure}' );
+    push @tex, &tail;
+    return \@tex;
+}
+
+# ----------
+# A3 CD-CASE
+# ----------
+sub _head_a3
+{
+    return q|\documentclass{article}
+\usepackage{graphicx}
+\usepackage[margin=1.3cm,noheadfoot]{geometry}
+\geometry{a3paper}
+\pagestyle{empty}
+\begin{document}
+|;
+}
+
+# 3 cd cover with front & back
+sub _a33
+{
+    my @figure = @_;
+    my @tex    = ();
+    push @tex, &_head_a3();
+    push @tex, "\\begin{figure}";
+    push @tex,
+      &_scale( &_figura( $figure[1], $FRONT ) . &_figura( $figure[0], $BACK ) );
+    push @tex,
+      &_scale( &_figura( $figure[3], $FRONT ) . &_figura( $figure[2], $BACK ) );
+    push @tex,
+      &_scale( &_figura( $figure[5], $FRONT ) . &_figura( $figure[4], $BACK ) );
+    push @tex, "\\end{figure}";
+    push @tex, &tail();
+    return \@tex;
+}
+
+# 2 cd cover with front, infront & back
+sub _a32
+{
+    my @figure = @_;
+    my @tex    = ();
+    push @tex, &_head_a3();
+    push @tex, "\\begin{figure}";
+    push @tex,
+      &_scale( &_rotate( &_figura( $figure[1], $FRONT ), "90" )
+          . &_rotate( &_figura( $figure[4], $FRONT ), "90" ) );
+    push @tex,
+      &_scale( &_rotate( &_figura( $figure[2], $FRONT ), "90" )
+          . &_rotate( &_figura( $figure[5], $FRONT ), "90" ) );
+    push @tex,
+      &_scale( &_rotate( &_figura( $figure[0], $BACK ), "90" )
+          . &_rotate( &_figura( $figure[3], $BACK ), "90" ) );
+    push @tex, "\\end{figure}";
+    push @tex, &tail();
+    return \@tex;
+}
+
+# 6 cd front
+sub _a3f
+{
+    my @figure = @_;
+    my @tex    = ();
+    push @tex, &_head_a3();
+    push @tex, "\\begin{figure}";
+    push @tex,
+      &_scale(
+        &_figura( $figure[0], $FRONT ) . &_figura( $figure[1], $FRONT ) );
+    push @tex,
+      &_scale(
+        &_figura( $figure[2], $FRONT ) . &_figura( $figure[3], $FRONT ) );
+    push @tex,
+      &_scale(
+        &_figura( $figure[4], $FRONT ) . &_figura( $figure[5], $FRONT ) );
+    push @tex, "\\end{figure}";
+    push @tex, &tail();
+    return \@tex;
+}
+
+# input of procedure:
+# &cdlabelgen( \@IMAGE, $opt{a}, $opt{t}, $opt{m}, \@FILE, $filltype );
+sub cdlabelgen
+{
+    my $images = shift;    # point to images array
+    my $c      = shift;    # artist
+    my $s      = shift;    # title
+    my $doslim = shift;    # do a slim cover if 1
+    my $f      = shift;    # txt file with the song titles
+    my $fill2  = shift;    # use fill2 option
+    my $env    = shift;    # create envelope
+
+    my $front = undef;
+    my $back;
+
+    ## check for side image :)
+    my $temporaryimage = '';
+    if ( -f $images->[2] )
+    {
+        $temporaryimage = &composeTryImage( $images->[0], $images->[2] );
+        $images = [ $temporaryimage, $images->[1] ];
+    }
+
+    ## convert images
+    my @IMG = @{ &_make_eps($images) };
+
+    # check converted images
+    if ( $#IMG == 1 )
+    {
+        $back  = $IMG[0];
+        $front = $IMG[1];
+    }
+    elsif ( $#IMG == 0 )
+    {
+        $back  = undef;
+        $front = $IMG[0];
+    }
+
+    ## create ps file
+    if ( defined $front )
+    {
+        my @fixed = (
+            $CDLABELGEN, '-D', '-e', $front, '-S', '0', '-C', '-b', '-o',
+            $front . '.ps'
+        );
+
+        ## do slim cover option
+        if ( defined $doslim && $doslim )
+        {
+            push @fixed, '-m';
+        }
+        ## create envelope cover
+        elsif ( defined $env && $env )
+        {
+            push @fixed, '-M';
+        }
+
+        ## add back image if defined
+        if ( defined $back )
+        {
+            push @fixed, '-E';
+            push @fixed, $back;
+        }
+
+        ## check for autor and title
+        if ( defined $c && defined $s )
+        {
+            push @fixed, '-c';
+            push @fixed, $c;
+            push @fixed, '-s';
+            push @fixed, $s;
+            if ( defined $back )
+            {
+                push @fixed, '-T';
+                if   ( defined $fill2 ) { push @fixed, 'fill2'; }
+                else                    { push @fixed, 'fill1'; }
+            }
+        }
+        else
+        {
+            if ( defined $back )
+            {
+                push @fixed, '-T';
+                if ( defined $doslim && $doslim ) { push @fixed, 'fill1'; }
+                else
+                {
+                    push @fixed, 'fill2';
+                }
+            }
+        }
+
+        ## adds song title by txt file
+        if ( defined $f->[0] )
+        {
+            my @ttt = ();
+            open( FILE, $f->[0] ) || die "NO txt file!!!\n\n";
+            while (<FILE>)
+            {
+                chomp;
+                push @ttt, $_;
+            }
+            close FILE;
+            open( FILE, ">temp_txt.txt" ) || die "NO TEMP TXT FILE!!!\n\n";
+            print FILE '{#MB}', ( shift @ttt ), "\n";
+            foreach (@ttt)
+            {
+                print FILE '{#M}', $_, "\n";
+            }
+            close FILE;
+            push @fixed, '-f';
+            push @fixed, "temp_txt.txt";
+            push @IMG,   "temp_txt.txt";
+        }
+        print join " ", @fixed, "\n";
+        system(@fixed);
+    }
+
+    ## remove temp eps files
+    push @IMG, $temporaryimage if ( $temporaryimage ne '' );
+    foreach (@IMG) { unlink($_); }
+}
+
+#
+# CREATE DVD COVER TEX CODE
+#
+sub createDVDtex
+{
+    my $picture = shift;
+    my $rotate  = shift;
+    my $dvd_dim = shift;
+
+    my $temp    = qq|$tempFile.eps|;
+    my @convert = ($CONVERT);
+    push @convert, ( '-rotate', '90' ) if ( defined $rotate );
+    system( @convert, $picture, $temp );
+    my @tex = ();
+    push @tex, q|\documentclass[a4paper]{article}
+\setlength{\hoffset}{-90pt}
+\setlength{\textwidth}{470pt}
+\setlength{\voffset}{-95pt}
+\setlength{\textheight}{720pt}
+\usepackage{graphicx}
+\pagestyle{empty}
+\begin{document}
+\begin{figure}|;
+    push @tex, q|\includegraphics| . $dvd_dim . q|{| . $temp . '}';
+    push @tex, q|\end{figure}
+\end{document}|;
+    return \@tex;
+}
+
+#
+# tray dimensions: 1,30cm + 27.40cm + 1,30cm = 30cm
+#
+sub composeTryImage
+{
+    my $back   = shift;
+    my $side   = shift;
+    my $side1  = '__side1.png';
+    my $side2  = '__side2.png';
+    my $result = '__back.eps';
+    my @info   = &get_width_height($back);
+    print $info[0], ' - ', $info[1], "\n";
+    my $lunghezzatotale = int( $info[0] * 30 / 27.4 );
+    my $lunghezzaside   = int( ( $lunghezzatotale - $info[0] ) / 2 );
+    my $sidedim         = $lunghezzaside . 'x' . $info[1] . '!';
+    system( $CONVERT, '-resize', $sidedim, $side,  $side1 );
+    system( $CONVERT, '-rotate', '180',    $side1, $side2 );
+    system( $CONVERT, '+append', $side1,   $back,  $side2, $result );
+    unlink( $side1, $side2 );
+    return $result;
+}
+
+#
+# returns image's dimension
+#
+sub get_width_height
+{
+    my $image = shift;
+    my $info  = `$IDENTIFY $image`;
+    my @a     = split /\s+/, $info;
+    @a = split 'x', $a[2];
+    return \@a;
+}
+
+#
+# Returns the filename extension
+#
+sub getEXT
+{
+    my $image = shift;
+    my $ext   = $image;
+    $ext =~ s/^.+\.//;
+    return $ext;
+}
+
+#
+# Creates two images
+#
+sub divideImage
+{
+    my $image     = shift;
+    my $width     = shift;
+    my $halfwidth = int( $width / 2 );
+    my $height    = shift;
+    my $ext       = &getEXT($image);
+    my $name      = substr( $image, 0, length($image) - length($ext) - 1 );
+    system( $CONVERT, '-quality', 100, '-crop',
+        $halfwidth . 'x' . $height . '+0+0',
+        $image, 'new-' . $name . '-0.' . $ext );
+    system( $CONVERT, '-quality', 100, '-crop',
+        $width . 'x' . $height . '+' . $halfwidth . '+0',
+        $image, 'new-' . $name . '-1.' . $ext );
+}

@@ -1,0 +1,487 @@
+#!/usr/bin/perl
+
+#
+# Copyright 2012-2013 Luciano Xumerle. All rights reserved.
+# Luciano Xumerle <luciano.xumerle@gmail.com>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+
+##
+## NOTE ## NOTE ## NOTE ## NOTE ## NOTE ## NOTE ## NOTE ## NOTE ## NOTE ##
+##
+## cmp3info uses some external programs to work:
+##
+## sox - http://sox.sourceforge.net/
+## id3v2 - http://id3v2.sourceforge.net/
+## mp3info - http://ibiblio.org/mp3info/
+## checkmp3 - http://sourceforge.net/projects/mp3check/ (rename the executable)
+##
+
+use strict;
+use warnings;
+use File::Find;
+use IPC::Open3;
+use MP3::Info;
+
+if ( !defined $ARGV[0] || $ARGV[0] eq '-h' )
+{
+    &help();
+}
+elsif ( $0 =~ m/freedb$/ && defined $ARGV[0] )
+{
+    &freedb();
+}
+elsif ( $ARGV[0] eq '-c' )
+{
+    &checkMP3();
+}
+elsif ( $ARGV[0] eq '-p' )
+{
+    &prefixWithTrackNumber();
+}
+elsif (defined $ARGV[1]
+    && $ARGV[0] eq '-r'
+    && -f $ARGV[1]
+    && $ARGV[1] =~ m/\.txt$/ )
+{
+    &getRYM( $ARGV[1] );
+}
+elsif ( defined $ARGV[1] && $ARGV[0] eq '-n' && -d $ARGV[1] )
+{
+    &rename_directory( $ARGV[1] );
+}
+elsif ( $ARGV[0] eq '-s' )
+{
+    &setPermission();
+}
+elsif ( $ARGV[0] eq '-cat' )
+{
+    &catMP3();
+}
+elsif ( $ARGV[0] eq '-t' )
+{
+    &tag2cddb();
+}
+else
+{
+    &help();
+}
+
+#
+# PRINT HELP
+#
+sub help
+{
+    print
+qq|---------------------------------------------------------------------------
+cmp3info version 0.0.3 (Jan 14, 2013)
+Copyright 2012-2013 by Luciano Xumerle <luciano.xumerle\@gmail.com>
+This is free software; see the source for copying conditions. There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+---------------------------------------------------------------------------\n\n|;
+
+    print q|SYNTAX:
+
+ - cmp3info -c            : Check for mp3 errors.
+ - cmp3info -cat <file1> <file2> ... <dest>
+                          : Cat mp3 files to dest mp3 file.
+ - cmp3info -p            : Rename "filename" to "num - filename".
+                            num is the track_number present in ID3tag.
+ - cmp3info -r <file.txt> : Print a RYM tracklist.
+ - cmp3info -t *.mp3      : Print CDDB file using mp3s tag.
+ - cmp3info -n <main_dir> : Rename directory to "year - title" using
+                            the stored txt file.
+ - cmp3info -s            : Change files (644) and directories (755)
+                            permissions in current directory.
+ - cmp3info -h            : Print this help.
+
+cmp3info uses some external programs.
+Read NOTE comments in script code for details.
+
+cmp3info may indent the txt file creating a symbolic link:
+ - ln -s cmp3info freedb
+
+SYNTAX (freedb):
+ - freedb <file.txt>
+
+|;
+}
+
+#
+# CHECKMP3
+#
+# Parse mp3 into directory and check for frame errors.
+# The report show time, number of bad frames, kb/s and filename.
+#
+
+sub checkMP3
+{
+    my @MP3 = ();
+    my @OGG = ();
+    find( sub { push @MP3, $File::Find::name if (m/^.+\.mp3$/) }, '.' );
+
+    # FIND OGG WAV FLAC -> USE SOX TO GET INFO
+    find( sub { push @OGG, $File::Find::name if (m/^.+\.ogg$/) },  '.' );
+    find( sub { push @OGG, $File::Find::name if (m/^.+\.wav$/) },  '.' );
+    find( sub { push @OGG, $File::Find::name if (m/^.+\.flac$/) }, '.' );
+
+    my ( $pid, $wtr, $rdr, $err );
+
+    print "\n\n";
+    my $totalminute  = 0;
+    my $totalseconds = 0;
+    print qq|time - bad frames - kb/s : filename\n|;
+
+    #
+    # CHECK MP3
+    #
+    system( 'id3v2', '--delete-v2', @MP3 );
+    foreach my $file ( sort @MP3 )
+    {
+        my $audiotype  = '';
+        my $minute     = 0;
+        my $seconds    = 0;
+        my $bad_frames = 0;
+
+        $pid = open3( $wtr, $rdr, $err, qq|mp3info -xra "$file"| );
+        while (<$rdr>)
+        {
+            $audiotype = &setAudiotype($1) if (m/Audio:\s+(\d+\.*\d*)/);
+            last if (m/^Copyright:/);
+        }
+        $pid = open3( $wtr, $rdr, $err, qq|checkmp3 "$file"| );
+        while (<$rdr>)
+        {
+            $bad_frames = $1 if (m/BAD_FRAMES\s+(\d+)/);
+            if (m/SONG_LENGTH\s+(\d+:\d+)/)
+            {
+                my @time = split ':', $1;
+                $minute  = $time[0];
+                $seconds = $time[1];
+                $totalminute  += $minute;
+                $totalseconds += $seconds;
+            }
+        }
+
+        # 60 seconds are 1 minute :)
+        while ( $totalseconds > 60 )
+        {
+            $totalseconds -= 60;
+            $totalminute++;
+        }
+        print qq|$minute:$seconds - $bad_frames - $audiotype : $file\n|;
+    }
+
+    #
+    # CHECK OGG/FLAC/WAV ## USE SOX
+    #
+    foreach my $file ( sort @OGG )
+    {
+        my $audiotype  = '';
+        my $minute     = 0;
+        my $seconds    = 0;
+        my $bad_frames = 0;
+
+        $pid = open3( $wtr, $rdr, $err, qq|sox -V "$file" -n stat| );
+        while (<$rdr>)
+        {
+            $audiotype = $1 if (m/Bit\s+Rate\s+:\s+(.+)\s*$/);
+
+            if (m/Duration\s+:\s+(\d+):(\d+):(\d+\.*\d*)\s+=/)
+            {
+                my $hour = $1;
+                $minute  = $2;
+                $minute  = $minute + $hour * 60 if ( $hour > 0 );
+                $seconds = &setAudiotype($3);
+                $seconds = qq|0$seconds| if ( $seconds < 10 );
+            }
+        }
+        $totalminute  += $minute;
+        $totalseconds += $seconds;
+        print qq|$minute:$seconds - $bad_frames - $audiotype : $file\n|;
+    }
+
+    # 60 seconds are 1 minute :)
+    while ( $totalseconds > 60 )
+    {
+        $totalseconds -= 60;
+        $totalminute++;
+    }
+
+    # FINAL REPORT
+    $totalseconds = qq|0$totalseconds| if ( $totalseconds < 10 );
+    print qq|\nTOTAL TIME: $totalminute:$totalseconds\n|;
+}
+
+sub setAudiotype
+{
+    my $audiotype = shift;
+    if ( int( $audiotype + 0.5 ) == int($audiotype) )
+    {
+        $audiotype = int($audiotype);
+    }
+    else { $audiotype = int( $audiotype + 0.5 ) }
+    return $audiotype;
+}
+
+#
+# PREFIXWITHTRACKNUMBER
+#
+# If mp3s tagged have no track number in filename then each
+# filename is prefixed using track number stored into the ID3 tag.
+#
+sub prefixWithTrackNumber
+{
+    foreach my $file (@ARGV)
+    {
+        if ( -f $file && $file =~ m/\.mp3$/i )
+        {
+            my $a = get_mp3tag($file);
+            $a = $a->{TRACKNUM} if ( defined $a->{TRACKNUM} );
+            $a =~ s|/\d+$||;
+            $a = qq|0$a| if ( $a < 10 );
+            rename( $file, qq|$a - $file| );
+        }
+    }
+}
+
+#
+# GETRYM
+#
+# Open the given txt file and print the RYM tracklist.
+# If all multimedia file are mp3 then print the time too.
+#
+sub getRYM
+{
+    my $file = shift;
+    if ( $file =~ m/\.txt$/i )
+    {
+        my ( $pid, $wtr, $rdr, $err, $cd );
+        my @length = ();
+        my @titles = ();
+
+        open( FILE, $file ) || die;
+        my $issue = 0;
+        my $songs = 0;
+        while (<FILE>)
+        {
+            s/[\r\n]+$//;
+            $issue++ if (m/^\s*--\s+CD/);
+            if (m/^\s*---\s+(.+)\s*$/)
+            {
+                push @titles, '|[b]' . $1 . '[\b]';
+            }
+            if (m/^\s*(\d+)\.\s+/)
+            {
+                my $cd = $1;
+                s/^\s*\d+\.\s+//;
+                s/^\s*\d+:\d+\s*//;
+                s/\s+##.+$//;
+                s/::/-/;
+                $cd = qq|$issue.$cd| if ( $issue > 0 );
+                $songs++;
+                push @titles, qq{$cd|$_};
+            }
+        }
+        close FILE;
+
+        $pid = open3( $wtr, $rdr, $err, qq|mp3info -xra *mp3| );
+        while (<$rdr>)
+        {
+            if (m/^Length:\s+(\d+:\d+)/i)
+            {
+                push @length, $1;
+            }
+        }
+
+        ## scrivo il testo da copia-incollare nel form di RYM
+        if ( $#length != $songs - 1 )
+        {
+            print STDERR
+              qq|CDDB FILE ERROR - $songs songs and $#length times!\n\n|;
+            @length = ();
+            foreach (@titles) { push @length, ''; }
+        }
+
+        my $len = 0;
+        for ( my $i = 0 ; $i <= $#titles ; $i++ )
+        {
+            if ( $titles[$i] =~ m/\[b\]/ ) { print qq{$titles[$i]|\n}; }
+            else
+            {
+                print qq{$titles[$i]|$length[$len]\n};
+                $len++;
+            }
+        }
+    }
+}
+
+#
+# RENAME DIRECTORY
+#
+# Each directory must have a txt file with the header:
+# <artist> :: <title> [(year)]
+# The script open the txt file and rename the directory as
+# "year - <title>" or "<title>" id year is empty.
+#
+sub rename_directory
+{
+    my $path = shift;
+
+    my @txt = ();
+    find( sub { push @txt, $File::Find::name if (m/^.+\.txt$/) }, $path );
+
+    foreach my $dir ( sort @txt )
+    {
+        my @fields = split '/', $dir;
+        open( FILE, $dir ) || die;
+        my $head = '';
+        my @song = ();
+        while (<FILE>)
+        {
+            chomp;
+            $head = $_ if ( $head eq '' );
+            push @song, $_ if ( m/^\s*\d+\.\s+/ || m/^\s*--\s*CD\d+/i );
+        }
+        my @aattyy = split '::', $head;
+        @aattyy = split '/', $head if ( $#aattyy == 0 );
+        if ( $aattyy[$#aattyy] =~ m/^(.+)\s+\((\d\d\d\d)\)\s*$/ )
+        {
+            $aattyy[$#aattyy] = $1;
+            push @aattyy, $2;
+        }
+        else { push @aattyy, ''; }
+        my $now  = join '/', $fields[0], $fields[1];
+        my $dest = join '/', $fields[0], $aattyy[2] . ' - ' . $aattyy[1];
+        $dest =~ s/\s+/ /;
+        $dest =~ s/^\s+//;
+        $dest =~ s/\s+$//;
+        print qq|mv "$now" "$dest"\n| if ( $dest ne $now );
+    }
+}
+
+#
+# SETPERMISSION
+#
+# Set the permission of each file (as 644) and directory (as 755).
+#
+sub setPermission
+{
+    system( 'find', '.', '-type', 'f', '-exec', '/bin/chmod', '644', '{}',
+        ';' );
+    system( 'find', '.', '-type', 'd', '-exec', '/bin/chmod', '755', '{}',
+        ';' );
+}
+
+#
+# INDENT THE TXT FILE
+#
+sub freedb
+{
+    my $message = qq|ERROR!\n\n|;
+    foreach my $file (@ARGV)
+    {
+        next if ( $file !~ m/.+\.txt$/i );
+        my @file;
+        open( FILE, "< $file" )
+          || die $message . "ERROR: File Unreadable\n\n";
+        while (<FILE>)
+        {
+            chomp;
+            s/^/    /g;
+            s/\s+/ /g;
+            s/\s*$//;
+            s/^\s+(?=\d\.)/  /g;
+            push @file, $_;
+        }
+        close FILE;
+
+        open( FILE, "> $file" )
+          || die $message . "ERROR: File $file Unwriteable\n\n";
+        foreach (@file) { print FILE $_, "\r\n"; }
+        close FILE;
+        print "=== FILE RESULT ===\n";
+        open( FILE, $file ) || die;
+        while (<FILE>) { print $_; }
+        close FILE;
+    }
+}
+
+#
+# cat mp3 files to a new one.
+#
+# Use: vbrfix & checkmp3 to create a good mp3 file
+#
+
+sub catMP3
+{
+    my @files = ();
+    my $dest  = '';
+
+    foreach my $ff (@ARGV)
+    {
+        next if ( $ff eq '-cat' );
+        push @files, $ff;
+    }
+
+    $dest = pop @files;
+
+    foreach (@files)
+    {
+        if ( !-f $_ )
+        {
+            print qq|INPUT FILE HAS WRONG NAME!!!\n\n|;
+            exit;
+        }
+    }
+
+    my $src = join ' ', @files;
+
+    print qq|CAT FILES:\n$src\n|;
+    `cat $src | checkmp3 -sf - >  /tmp/pippo`;
+    print qq|VBRFIX...\n|;
+    `vbrfix -always /tmp/pippo $dest`;
+    print qq|REMOVE temp file\n|;
+    unlink('/tmp/pippo');
+    print qq|DONE\n|;
+}
+
+#
+# UPDATE FILENAME FROM TAG
+#
+sub tag2cddb
+{
+    my $counter = 1;
+    foreach my $file (@ARGV)
+    {
+        next if ( $file eq '-t' );
+
+        my $tag = get_mp3tag($file);
+
+        my $artist = '';
+        my $title  = '';
+
+        $artist = $tag->{ARTIST} if ( defined $tag->{ARTIST} );
+        $title  = $tag->{TITLE}  if ( defined $tag->{TITLE} );
+
+        if ( $artist ne '' && $title ne '' )
+        {
+            print qq|$counter. $artist :: $title\n|;
+            $artist = '';
+            $title  = '';
+            $counter++;
+        }
+    }
+}
