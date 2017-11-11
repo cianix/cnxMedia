@@ -23,7 +23,7 @@ use warnings;
 
 print STDERR
   q|---------------------------------------------------------------------------
-freedb version 0.0.1 (Aug 19, 2016)
+freedb version 0.0.2 (Nov 11, 2017)
 Copyright 2016 by Luciano Xumerle <luciano.xumerle@gmail.com>
 This is free software; see the source for copying conditions. There is NO
 warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
@@ -44,6 +44,7 @@ foreach my $file (@ARGV)
     while (<FILE>)
     {
         chomp;
+        s/\s+/ /g;
         s/^/    /g;
         s/\s\s+/ /g;
         s/\s+$//;
