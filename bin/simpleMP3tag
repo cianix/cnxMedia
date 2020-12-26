@@ -1,0 +1,127 @@
+#!/usr/bin/perl
+
+#
+# Copyright 2020 Luciano Xumerle. All rights reserved.
+# Luciano Xumerle <luciano.xumerle@gmail.com>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+
+use strict;
+use warnings;
+
+my $file = '';
+if ( defined $ARGV[0] && -f $ARGV[0] )
+{
+    $file = $ARGV[0];
+}
+else
+{
+    &help();
+    exit;
+}
+
+my @songs = sort glob("*.mp3");
+
+my $tot = $#songs + 1;
+
+open( TXT, $file ) || die;
+
+my $artist = '';
+my $album  = '';
+my $year   = 0;
+my @titles = ();
+
+while (<TXT>)
+{
+    s/\s+$//;
+    s/\s+##.*$//;
+
+    if ( $artist eq '' && m/^\s*(.+)\s+::\s+(.+)\s*$/ )
+    {
+        $artist = $1;
+        $album  = $2;
+        if ( $album =~ m/^(.+)\s\((\d\d\d\d)\)$/ )
+        {
+            $album = $1;
+            $year  = $2;
+        }
+    }
+
+    if (m/^\s*(\d+)\.\s+(.+)\s*$/)
+    {
+        my $num = $1;
+        my $tit = $2;
+
+        $tit = $2 if ( $tit =~ m/(.+)\s+::\s+(.+)/ );
+
+        push @titles,
+          [
+            'mp3info', '-a', $artist, '-l', $album, '-n',
+            $num,      '-t', $tit,    '-y', $year
+          ];
+    }
+}
+close TXT;
+
+if ( $#titles == $#songs )
+{
+    &help();
+    system( 'id3v2', '-D', @songs );
+
+    for ( my $i = 0 ; $i <= $#songs ; $i++ )
+    {
+        system( @{ $titles[$i] }, $songs[$i] );
+    }
+
+    print STDERR qq|\n$tot mp3 files were tagged!\n\n|;
+
+}
+else
+{
+    &help();
+}
+
+#
+# PRINT HELP
+#
+sub help
+{
+    print STDERR
+qq|---------------------------------------------------------------------------
+simpleMP3tag version 0.0.1 (Dec 26, 2020)
+Copyright 2020 by Luciano Xumerle <luciano.xumerle\@gmail.com>
+This is free software; see the source for copying conditions. There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+---------------------------------------------------------------------------\n\n|;
+
+    print STDERR q|SYNTAX:
+
+ - simpleMP3tag <file.txt>
+
+The script take the list of mp3 files from current directory
+and load TAG information from a text file.
+
+The format is:
+
+ARTIST :: ALBUM TITLE (YEAR)
+
+1. title1
+2. title2
+....
+
+The Number of mp3 files and tracks on txt file must be the same. 
+The script uses mp3info and id3v2 to make the job.
+|;
+}
