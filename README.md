@@ -59,6 +59,32 @@ Others options:
    -tex <name>
 ~~~~~
 
+
+## simpleMP3tag
+
+A simple MP3 tagger.
+
+~~~~~
+SYNTAX:
+
+ - simpleMP3tag <file.txt>
+
+The script take the list of mp3 files from current directory
+and load TAG information from a text file.
+
+The format is:
+
+ARTIST :: ALBUM TITLE (YEAR)
+
+1. title1
+2. title2
+....
+
+The Number of mp3 files and tracks on txt file must be the same. 
+The script uses mp3info and id3v2 to make the job.
+~~~~~
+
+
 ## AUTHORS
 
 Luciano Xumerle <luciano.xumerle@gmail.com>
