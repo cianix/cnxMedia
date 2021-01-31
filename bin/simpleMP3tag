@@ -61,15 +61,20 @@ while (<TXT>)
 
     if (m/^\s*(\d+)\.\s+(.+)\s*$/)
     {
-        my $num = $1;
-        my $tit = $2;
+        my $tartist = $artist;
+        my $num     = $1;
+        my $tit     = $2;
 
-        $tit = $2 if ( $tit =~ m/(.+)\s+::\s+(.+)/ );
+        if ( $tit =~ m/^\s*(.+)\s+::\s+(.+)\s*$/ )
+        {
+            $tartist = $1;
+            $tit     = $2;
+        }
 
         push @titles,
           [
-            'mp3info', '-a', $artist, '-l', $album, '-n',
-            $num,      '-t', $tit,    '-y', $year
+            'mp3info', '-a', $tartist, '-l', $album, '-n',
+            $num,      '-t', $tit,     '-y', $year
           ];
     }
 }
