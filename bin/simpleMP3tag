@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 
 #
-# Copyright 2020 Luciano Xumerle. All rights reserved.
+# Copyright 2020-2021 Luciano Xumerle. All rights reserved.
 # Luciano Xumerle <luciano.xumerle@gmail.com>
 #
 # This program is free software: you can redistribute it and/or modify
@@ -32,7 +32,13 @@ else
     exit;
 }
 
-my @songs = sort glob("*.mp3");
+my $isFlac = 0;
+my @songs  = sort glob("*.mp3");
+if ( $#songs < 0 )
+{
+    @songs = sort glob("*flac");
+    $isFlac++;
+}
 
 my $tot = $#songs + 1;
 
@@ -71,11 +77,26 @@ while (<TXT>)
             $tit     = $2;
         }
 
-        push @titles,
-          [
-            'mp3info', '-a', $tartist, '-l', $album, '-n',
-            $num,      '-t', $tit,     '-y', $year
-          ];
+        if ($isFlac)
+        {
+            push @titles,
+              [
+                'metaflac',           '--set-tag',
+                qq|ARTIST=$tartist|,  '--set-tag',
+                qq|ALBUM=$album|,     '--set-tag',
+                qq|TRACKNUMBER=$num|, '--set-tag',
+                qq|TITLE=$tit|,       '--set-tag',
+                qq|DATE=$year|
+              ];
+        }
+        else
+        {
+            push @titles,
+              [
+                'mp3info', '-a', $tartist, '-l', $album, '-n',
+                $num,      '-t', $tit,     '-y', $year
+              ];
+        }
     }
 }
 close TXT;
@@ -83,14 +104,22 @@ close TXT;
 if ( $#titles == $#songs )
 {
     &help();
-    system( 'id3v2', '-D', @songs );
+
+    if ($isFlac)
+    {
+        system( 'metaflac', '--remove-all', @songs );
+    }
+    else
+    {
+        system( 'id3v2', '-D', @songs );
+    }
 
     for ( my $i = 0 ; $i <= $#songs ; $i++ )
     {
         system( @{ $titles[$i] }, $songs[$i] );
     }
 
-    print STDERR qq|\n$tot mp3 files were tagged!\n\n|;
+    print STDERR qq|\n$tot files were tagged!\n\n|;
 
 }
 else
@@ -105,7 +134,7 @@ sub help
 {
     print STDERR
 qq|---------------------------------------------------------------------------
-simpleMP3tag version 0.0.1 (Dec 26, 2020)
+simpleMP3tag version 0.1.0 (Dec 31, 2021)
 Copyright 2020 by Luciano Xumerle <luciano.xumerle\@gmail.com>
 This is free software; see the source for copying conditions. There is NO
 warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
@@ -115,8 +144,8 @@ warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
  - simpleMP3tag <file.txt>
 
-The script take the list of mp3 files from current directory
-and load TAG information from a text file.
+The script takes the list of mp3 or flac files from the current
+directory and loads TAG information from a formatted text file.
 
 The format is:
 
@@ -126,7 +155,7 @@ ARTIST :: ALBUM TITLE (YEAR)
 2. title2
 ....
 
-The Number of mp3 files and tracks on txt file must be the same. 
-The script uses mp3info and id3v2 to make the job.
+The Number of mp3 or flac files and tracks in txt file must be the same. 
+The script uses mp3info and id3v2 to tag mp3s and metaflac to tag flacs.
 |;
 }

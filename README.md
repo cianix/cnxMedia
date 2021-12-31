@@ -62,15 +62,15 @@ Others options:
 
 ## simpleMP3tag
 
-A simple MP3 tagger.
+A simple MP3 / FLAC tagger.
 
 ~~~~~
 SYNTAX:
 
  - simpleMP3tag <file.txt>
 
-The script take the list of mp3 files from current directory
-and load TAG information from a text file.
+The script takes the list of mp3 or flac files from the current
+directory and loads TAG information from a formatted text file.
 
 The format is:
 
@@ -80,8 +80,8 @@ ARTIST :: ALBUM TITLE (YEAR)
 2. title2
 ....
 
-The Number of mp3 files and tracks on txt file must be the same. 
-The script uses mp3info and id3v2 to make the job.
+The Number of mp3 or flac files and tracks in txt file must be the same. 
+The script uses mp3info and id3v2 to tag mp3s and metaflac to tag flacs.
 ~~~~~
 
 
